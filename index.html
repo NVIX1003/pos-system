@@ -9,24 +9,32 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     
-    <!-- 引入 WebLLM 最新穩定核心 (使用解構匯出確保載入順暢) -->
+    <!-- 引入 WebLLM 最新穩定核心 -->
     <script type="module">
         import * as webllm from "https://esm.run/@mlc-ai/web-llm";
         window.webllm = webllm;
-        // 觸發自訂事件，通知主程式 WebLLM 模組已成功掛載
         window.dispatchEvent(new Event('webllm-ready'));
     </script>
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 30px 20px; max-width: 500px; margin: 0 auto; background: #f5f5f7; display: flex; flex-direction: column; min-height: 80vh; justify-content: center; }
-        .card { background: white; padding: 25px; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.08); text-align: center; }
-        .main-btn { width: 100%; min-height: 90px; padding: 15px; border: none; border-radius: 50px; font-size: 18px; font-weight: bold; cursor: pointer; color: white; background: #0071e3; transition: all 0.3s ease; box-shadow: 0 4px 15px rgba(0,113,227,0.3); margin-bottom: 25px; word-break: break-all; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 20px 15px; max-width: 500px; margin: 0 auto; background: #f5f5f7; display: flex; flex-direction: column; min-height: 90vh; justify-content: center; }
+        .card { background: white; padding: 20px; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.08); text-align: center; }
+        .main-btn { width: 100%; min-height: 80px; padding: 15px; border: none; border-radius: 50px; font-size: 18px; font-weight: bold; cursor: pointer; color: white; background: #0071e3; transition: all 0.3s ease; box-shadow: 0 4px 15px rgba(0,113,227,0.3); margin-bottom: 15px; word-break: break-all; }
         .main-btn:disabled { background: #86868b; box-shadow: none; cursor: not-allowed; }
         .main-btn.listening { background: #ff3b30; animation: pulse 1.5s infinite; box-shadow: 0 4px 15px rgba(255,59,48,0.4); }
         #status-text { color: #86868b; font-size: 14px; margin-bottom: 10px; font-weight: 500; }
+        
+        /* 即時語音顯示區 */
+        .live-speech-box { background: #eef2ff; border: 1px dashed #6366f1; color: #3730a3; padding: 10px; border-radius: 10px; font-size: 14px; margin-bottom: 15px; min-height: 42px; text-align: left; word-break: break-all; }
+        
         progress { width: 100%; height: 12px; border-radius: 6px; overflow: hidden; margin-bottom: 15px; display: block; }
-        .result-section { border-top: 2px dashed #e5e5ea; padding-top: 20px; margin-top: 10px; text-align: left; display: none; }
-        .result-box { display: flex; justify-content: space-between; border-bottom: 1px solid #f2f2f7; padding: 10px 0; font-size: 16px; }
-        .total { font-size: 24px; font-weight: bold; color: #ff3b30; text-align: right; margin-top: 20px; }
+        .result-section { border-top: 2px dashed #e5e5ea; padding-top: 15px; margin-top: 10px; text-align: left; display: none; }
+        .result-box { display: flex; justify-content: space-between; border-bottom: 1px solid #f2f2f7; padding: 8px 0; font-size: 16px; }
+        .total { font-size: 22px; font-weight: bold; color: #ff3b30; text-align: right; margin-top: 15px; }
+        
+        /* 🛠️ 臨時除錯區塊 (Debug Area) */
+        .debug-area { margin-top: 20px; background: #282c34; color: #61afef; padding: 12px; border-radius: 10px; font-family: monospace; font-size: 12px; text-align: left; word-break: break-all; white-space: pre-wrap; max-height: 200px; overflow-y: auto; }
+        .debug-title { color: #e5c07b; font-weight: bold; margin-bottom: 5px; font-family: sans-serif; display: flex; justify-content: space-between; }
+
         @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.02); } 100% { transform: scale(1); } }
     </style>
 </head>
@@ -35,13 +43,25 @@
     <div class="card">
         <div id="status-text">⏳ 正在初始化 WebGPU 環境...</div>
         <progress id="download-progress" value="0" max="100"></progress>
+        
+        <!-- 🎙️ 即時語音文字顯示區 -->
+        <div class="live-speech-box" id="speech-box">🗣️ 語音即時辨識：等待開始...</div>
+
         <button class="main-btn" id="action-btn" disabled>請稍候...</button>
 
         <div class="result-section" id="result-area">
             <p style="font-size: 16px;"><strong>顧客姓名：</strong> <span id="res-customer" style="color:#0071e3;">-</span></p>
-            <h3 style="margin-top: 15px; margin-bottom: 10px; font-size: 16px; color:#1d1d1f;">點餐明細</h3>
+            <h3 style="margin-top: 10px; margin-bottom: 5px; font-size: 16px; color:#1d1d1f;">點餐明細</h3>
             <div id="res-items"></div>
             <div class="total" id="res-total">總金額：$0</div>
+        </div>
+
+        <!-- 🛠️ 除錯區塊：查看 AI 輸出的原始 JSON -->
+        <div class="debug-area">
+            <div class="debug-title">
+                <span>🔍 [除錯區] AI 原始輸出內容：</span>
+            </div>
+            <div id="debug-json">等待點餐解析...</div>
         </div>
     </div>
 
@@ -54,20 +74,20 @@
         let isListening = false;
         let finalTranscript = "";
         
-        // 使用極輕量、適配行動裝置 WebGPU 的 Qwen2.5-0.5B 模型
         const modelId = "Qwen2.5-0.5B-Instruct-q4f16_1-MLC"; 
 
         const actionBtn = document.getElementById('action-btn');
         const statusText = document.getElementById('status-text');
+        const speechBox = document.getElementById('speech-box');
         const progressEl = document.getElementById('download-progress');
         const resultArea = document.getElementById('result-area');
         const resCustomer = document.getElementById('res-customer');
         const resItems = document.getElementById('res-items');
         const resTotal = document.getElementById('res-total');
+        const debugJson = document.getElementById('debug-json');
 
         async function initSystem() {
             try {
-                // 1. 檢查 WebGPU 硬體支援
                 if (!navigator.gpu) {
                     statusText.innerText = "❌ 瀏覽器不支援 WebGPU，請使用 Chrome/Edge 或 iOS 17+ Safari。";
                     actionBtn.innerText = "不支援此裝置硬體";
@@ -79,12 +99,11 @@
 
                 statusText.innerText = "⏳ 正在初始化 WebLLM 引擎核心...";
                 
-                // 2. 呼叫 CreateMLCEngine 載入 WebGPU AI 模型
                 engine = await window.webllm.CreateMLCEngine(modelId, {
                     initProgressCallback: (report) => {
                         let percent = Math.round((report.progress || 0) * 100);
                         progressEl.value = percent; 
-                        statusText.innerText = `🧠 AI 模型的權重加載中... (${percent}%) - ${report.text || ''}`;
+                        statusText.innerText = `🧠 AI 模型加載中... (${percent}%)`;
                         actionBtn.innerText = `讀取中 ${percent}%`;
                         
                         if (percent >= 100) {
@@ -99,7 +118,7 @@
             } catch (err) {
                 console.error("Initialization Error:", err);
                 statusText.innerText = "❌ 初始化失敗，請重刷網頁。";
-                alert("WebGPU 初始化失敗:\n" + err.message);
+                debugJson.innerText = "初始化錯誤: " + err.message;
                 actionBtn.innerText = "系統錯誤";
             }
         }
@@ -107,7 +126,7 @@
         function setupSpeech() {
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             if (!SpeechRecognition) {
-                statusText.innerText = "⚠️ 瀏覽器不支援內建語音轉文字API";
+                statusText.innerText = "⚠️ 瀏覽器不支援內建語音轉文字 API";
                 return;
             }
             
@@ -125,7 +144,9 @@
                         interimTranscript += event.results[i].transcript;
                     }
                 }
-                actionBtn.innerText = finalTranscript || interimTranscript || "正在聆聽...";
+                const currentText = finalTranscript || interimTranscript;
+                // 🗣️ 即時更新語音文字區塊
+                speechBox.innerText = "🗣️ 說話內容：" + (currentText || "（聆聽中...）");
             };
 
             recognition.onerror = (err) => {
@@ -144,7 +165,9 @@
                 actionBtn.innerText = "請說話...";
                 actionBtn.classList.add('listening');
                 statusText.innerText = "🔴 錄音中... 說完請再按一下按鈕。";
+                speechBox.innerText = "🗣️ 說話內容：請開始說話...";
                 resultArea.style.display = "none";
+                debugJson.innerText = "等待 AI 回傳...";
                 
                 try { recognition.start(); } catch(e) {}
             } else {
@@ -160,45 +183,55 @@
             
             try { recognition.stop(); } catch(e) {}
 
-            if (!finalTranscript.trim()) { finalTranscript = actionBtn.innerText; }
-            if (finalTranscript === "請說話..." || !finalTranscript.trim()) {
+            const textToProcess = finalTranscript.trim();
+            if (!textToProcess) {
                 statusText.innerText = "⚠️ 沒有偵測到語音，請再試一次。";
                 actionBtn.innerText = "🎤 按一下 開始點餐";
                 actionBtn.disabled = false;
                 return;
             }
 
-            await askLocalAI(finalTranscript);
+            await askLocalAI(textToProcess);
         }
 
         async function askLocalAI(text) {
-            const systemPrompt = `You are a precise POS text parser. Extract customer name and ordered items from Chinese text.
-Strict Rules:
-1. In Chinese ordering, quantity ALWAYS appears BEFORE the item name (e.g., "三杯紅茶" means 3 Black Tea).
-2. Output ONLY raw valid JSON without markdown code fences or conversational text.
-JSON Structure:
-{"customer": "string", "items": [{"name": "string", "count": integer}]}`;
+            // 簡化系統 Prompt，給出更簡潔強烈的格式要求
+            const systemPrompt = `Task: Extract ordered items from Chinese text into JSON.
+Output MUST be pure JSON with no commentary.
+Format:
+{"customer":"name_or_unknown","items":[{"name":"item_name","count":1}]}
+
+Example Input: 老黃要兩杯咖啡
+Example Output: {"customer":"老黃","items":[{"name":"咖啡","count":2}]}`;
 
             try {
                 const reply = await engine.chat.completions.create({
                     messages: [
                         { role: "system", content: systemPrompt },
-                        { role: "user", content: `Text: ${text}` }
+                        { role: "user", content: `Input: ${text}` }
                     ],
-                    temperature: 0.0
+                    temperature: 0.1
                 });
 
-                // 🛠️ 修正 3：choices 為陣列，需取 [0]
+                // 取出 AI 的完整原始文字
                 const rawOutput = reply.choices[0].message.content.trim();
                 
-                // 去除可能出現的 ```json ... ``` 標記
-                const cleanJsonText = rawOutput.replace(/```json/g, '').replace(/```/g, '').trim();
+                // 🔍 呈現原汁原味的 AI 回傳於除錯區塊
+                debugJson.innerText = rawOutput;
+
+                // 🛠️ 使用正則表達式只抓取第一個 {...} JSON 區塊
+                const jsonMatch = rawOutput.match(/\{[\s\S]*\}/);
                 
-                renderPOSResult(JSON.parse(cleanJsonText));
+                if (jsonMatch) {
+                    const parsedData = JSON.parse(jsonMatch[0]);
+                    renderPOSResult(parsedData);
+                } else {
+                    throw new Error("模型回傳的文字中找不到標準 {} JSON 格式");
+                }
+
             } catch (err) {
                 console.error("AI Parsing Error:", err);
-                statusText.innerText = "❌ 本地 AI 解析失敗，請重新嘗試。";
-                alert("AI 解析出錯: " + err.message);
+                statusText.innerText = "❌ 本地 AI 解析失敗，請看下方除錯區。";
             } finally {
                 actionBtn.innerText = "🎤 按一下 開始點餐";
                 actionBtn.disabled = false;
@@ -206,7 +239,8 @@ JSON Structure:
         }
 
         function renderPOSResult(jsonData) {
-            const rawCust = jsonData.customer || "未知";
+            // 容錯機制：顧客 Key 可能是 customer / name
+            const rawCust = jsonData.customer || jsonData.name || "未知";
             const realCust = CUSTOMER_DB[rawCust] || rawCust;
             resCustomer.innerText = `${realCust} (${rawCust})`;
 
@@ -215,13 +249,16 @@ JSON Structure:
 
             if (jsonData.items && Array.isArray(jsonData.items)) {
                 jsonData.items.forEach(item => {
-                    const price = PRICE_DB[item.name] || 0;
-                    const subtotal = price * (item.count || 1);
+                    const itemName = item.name || item.item || "未知品項";
+                    // 容錯機制：數量 Key 可能是 count / qty / quantity
+                    const count = Number(item.count || item.qty || item.quantity || 1);
+                    const price = PRICE_DB[itemName] || 0;
+                    const subtotal = price * count;
                     grandTotal += subtotal;
 
                     html += `
                         <div class="result-box">
-                            <span>☕ ${item.name} x ${item.count}</span>
+                            <span>☕ ${itemName} x ${count}</span>
                             <span>小計: $${subtotal}</span>
                         </div>`;
                 });
@@ -233,12 +270,10 @@ JSON Structure:
             resultArea.style.display = "block";
         }
 
-        // 🛠️ 關鍵修正 1：監聽 WebLLM 模組加載完畢後，自動觸發系統初始化
         window.addEventListener('webllm-ready', () => {
             initSystem();
         });
 
-        // 備用觸發：如果模組早已加載好，直接執行
         if (window.webllm) {
             initSystem();
         }
