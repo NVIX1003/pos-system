@@ -238,15 +238,30 @@
           "蛋餅": 35
         };
 
-        const processTextWithLocalAI = async (textInput) => {
-          isProcessing.value = true;
-          statusMessage.value = '⚡ 本地端 AI 解析中...';
+        // 簡易中文數字轉阿拉伯數字與正規化函式
+function normalizeText(text) {
+  const cnNums = { '一': '1', '二': '2', '兩': '2', '三': '3', '四': '4', '五': '5', '六': '6', '七': '7', '八': '8', '九': '9', '十': '10' };
+  
+  let result = text;
+  // 將常見中文數字替換為阿拉伯數字
+  for (const [cn, num] of Object.entries(cnNums)) {
+    result = result.replaceAll(cn, num);
+  }
+  return result;
+}
 
-          try {
-            const messages = [
-              { role: "system", content: systemPrompt },
-              { role: "user", content: `輸入：${textInput}` }
-            ];
+const processTextWithLocalAI = async (textInput) => {
+  isProcessing.value = true;
+  statusMessage.value = '⚡ 本地端 AI 解析中...';
+
+  // 1. 先將輸入文字正規化 (如："小張10杯咖啡1杯紅茶1杯綠茶")
+  const cleanedInput = normalizeText(textInput);
+
+  try {
+    const messages = [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: `輸入：${cleanedInput}` } // 帶入正規化後的文字
+    ];
 
             const response = await engine.chat.completions.create({
               messages,
