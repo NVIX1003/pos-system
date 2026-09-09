@@ -177,7 +177,8 @@
           }
         });
 
-        const systemPrompt = `你是一個 POS 點餐解析系統。請分析使用者輸入的點餐文字，並嚴格只輸出 JSON 格式，不要包含任何額外說明文字或 Markdown 標籤。
+        const systemPrompt = `你是一個 POS 點餐解析系統。請點餐文字嚴格只輸出 JSON 格式，不要包含任何額外說明文字或 Markdown 標籤。
+必須嚴格遵守以下對照表：
 
 【顧客資料庫】：
 - "老黃" -> "黃大雄"
@@ -185,20 +186,20 @@
 - "陳姐" -> "陳美玲"
 
 【菜單與價格】：
-- 咖啡: 80
-- 紅茶: 40
-- 綠茶: 40
-- 三明治: 65
-- 蛋餅: 35
+咖啡, 紅茶, 綠茶, 三明治, 蛋餅
 
-【輸出 JSON 格式範例】：
-{
-  "customer_name": "黃大雄",
-  "items": [
-    {"name": "咖啡", "qty": 1, "price": 80}
-  ],
-  "total_amount": 80
-}`;
+【重要規則】：
+1. 顧客姓名必須轉換為資料庫全名（例如：老黃 必須輸出為 黃大雄）。
+2. 必須完整提取句子中提到的「所有」品項與數量，不可遺漏。
+3. 只輸出純 JSON，不要加任何解釋。
+
+【範例 1】：
+輸入：老黃兩杯咖啡一杯紅茶一杯綠茶
+輸出：{"customer_name":"黃大雄","items":[{"name":"咖啡","qty":2},{"name":"紅茶","qty":1},{"name":"綠茶","qty":1}]}
+
+【範例 2】：
+輸入：小張一個三明治
+輸出：{"customer_name":"張小明","items":[{"name":"三明治","qty":1}]}`;
 
         const toggleListening = async () => {
           if (!recognition) return;
@@ -231,6 +232,15 @@
           }
         };
 
+// 在外層定義價格資料庫，讓 JS 直接算錢
+        const PRICE_MAP = {
+          "咖啡": 80,
+          "紅茶": 40,
+          "綠茶": 40,
+          "三明治": 65,
+          "蛋餅": 35
+        };
+
         const processTextWithLocalAI = async (textInput) => {
           isProcessing.value = true;
           statusMessage.value = '⚡ 本地端 AI 解析中...';
@@ -238,21 +248,42 @@
           try {
             const messages = [
               { role: "system", content: systemPrompt },
-              { role: "user", content: `使用者點餐文字：「${textInput}」` }
+              { role: "user", content: `輸入：${textInput}` }
             ];
 
             const response = await engine.chat.completions.create({
               messages,
-              temperature: 0.1,
+              temperature: 0.0 // 設為 0，讓輸出最穩定且確定
             });
 
             const rawText = response.choices[0].message.content;
             
-            // 提防 Local AI 在 JSON 外夾帶 markdown 標籤
+            // 抓取 JSON 區塊
             const jsonMatch = rawText.match(/\{[\s\S]*\}/);
             if (!jsonMatch) throw new Error("模型未回傳正確 JSON 格式");
 
-            parsedOrder.value = JSON.parse(jsonMatch[0]);
+            const rawResult = JSON.parse(jsonMatch[0]);
+
+            // 🛠️ 關鍵優化：用 JavaScript 進行補全與精準計算，避免 AI 算錯金額
+            let calculatedTotal = 0;
+            const processedItems = (rawResult.items || []).map(item => {
+              const price = PRICE_MAP[item.name] || 0;
+              const qty = Number(item.qty) || 1;
+              calculatedTotal += price * qty;
+              return {
+                name: item.name,
+                qty: qty,
+                price: price
+              };
+            });
+
+            // 組合出最終精確的訂單資料
+            parsedOrder.value = {
+              customer_name: rawResult.customer_name || '未識別',
+              items: processedItems,
+              total_amount: calculatedTotal
+            };
+
             showModal.value = true;
             statusMessage.value = '解析完成！';
 
