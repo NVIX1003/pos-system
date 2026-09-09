@@ -263,7 +263,7 @@ const processTextWithLocalAI = async (textInput) => {
 
             const response = await engine.chat.completions.create({
               messages,
-              temperature: 0.0 // 設為 0，讓輸出最穩定且確定
+              temperature: 0.0, // 設為 0，讓輸出最穩定且確定
               max_tokens: 150, // 確保給予足夠長度輸出完 JSON
               stop: ["\n\n", "```"] // 避免生成多餘贅字
             });
