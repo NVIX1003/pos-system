@@ -1,282 +1,301 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>智慧語音點餐 POS (WebGPU 本地版)</title>
-    <!-- 強制破壞快取 -->
-    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-    <meta http-equiv="Pragma" content="no-cache">
-    <meta http-equiv="Expires" content="0">
-    
-    <!-- 引入 WebLLM 最新穩定核心 -->
-    <script type="module">
-        import * as webllm from "https://esm.run/@mlc-ai/web-llm";
-        window.webllm = webllm;
-        window.dispatchEvent(new Event('webllm-ready'));
-    </script>
-    <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 20px 15px; max-width: 500px; margin: 0 auto; background: #f5f5f7; display: flex; flex-direction: column; min-height: 90vh; justify-content: center; }
-        .card { background: white; padding: 20px; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.08); text-align: center; }
-        .main-btn { width: 100%; min-height: 80px; padding: 15px; border: none; border-radius: 50px; font-size: 18px; font-weight: bold; cursor: pointer; color: white; background: #0071e3; transition: all 0.3s ease; box-shadow: 0 4px 15px rgba(0,113,227,0.3); margin-bottom: 15px; word-break: break-all; }
-        .main-btn:disabled { background: #86868b; box-shadow: none; cursor: not-allowed; }
-        .main-btn.listening { background: #ff3b30; animation: pulse 1.5s infinite; box-shadow: 0 4px 15px rgba(255,59,48,0.4); }
-        #status-text { color: #86868b; font-size: 14px; margin-bottom: 10px; font-weight: 500; }
-        
-        /* 即時語音顯示區 */
-        .live-speech-box { background: #eef2ff; border: 1px dashed #6366f1; color: #3730a3; padding: 10px; border-radius: 10px; font-size: 14px; margin-bottom: 15px; min-height: 42px; text-align: left; word-break: break-all; }
-        
-        progress { width: 100%; height: 12px; border-radius: 6px; overflow: hidden; margin-bottom: 15px; display: block; }
-        .result-section { border-top: 2px dashed #e5e5ea; padding-top: 15px; margin-top: 10px; text-align: left; display: none; }
-        .result-box { display: flex; justify-content: space-between; border-bottom: 1px solid #f2f2f7; padding: 8px 0; font-size: 16px; }
-        .total { font-size: 22px; font-weight: bold; color: #ff3b30; text-align: right; margin-top: 15px; }
-        
-        /* 🛠️ 臨時除錯區塊 (Debug Area) */
-        .debug-area { margin-top: 20px; background: #282c34; color: #61afef; padding: 12px; border-radius: 10px; font-family: monospace; font-size: 12px; text-align: left; word-break: break-all; white-space: pre-wrap; max-height: 200px; overflow-y: auto; }
-        .debug-title { color: #e5c07b; font-weight: bold; margin-bottom: 5px; font-family: sans-serif; display: flex; justify-content: space-between; }
-
-        @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.02); } 100% { transform: scale(1); } }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>語音 POS 點餐系統 (本地端 AI 版)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
 </head>
-<body>
+<body class="bg-slate-100 min-h-screen p-4 flex flex-col items-center justify-center">
 
-    <div class="card">
-        <div id="status-text">⏳ 正在初始化 WebGPU 環境...</div>
-        <progress id="download-progress" value="0" max="100"></progress>
-        
-        <!-- 🎙️ 即時語音文字顯示區 -->
-        <div class="live-speech-box" id="speech-box">🗣️ 語音即時辨識：等待開始...</div>
+  <div id="app" class="w-full max-w-md bg-white rounded-2xl shadow-xl p-6 space-y-6 relative">
+    
+    <h1 class="text-2xl font-bold text-slate-800 text-center pt-2">🎤 語音 POS 點餐系統</h1>
+    <p class="text-xs text-center text-slate-500">（純本地端運算 - WebLLM）</p>
 
-        <button class="main-btn" id="action-btn" disabled>請稍候...</button>
-
-        <div class="result-section" id="result-area">
-            <p style="font-size: 16px;"><strong>顧客姓名：</strong> <span id="res-customer" style="color:#0071e3;">-</span></p>
-            <h3 style="margin-top: 10px; margin-bottom: 5px; font-size: 16px; color:#1d1d1f;">點餐明細</h3>
-            <div id="res-items"></div>
-            <div class="total" id="res-total">總金額：$0</div>
-        </div>
-
-        <!-- 🛠️ 除錯區塊：查看 AI 輸出的原始 JSON -->
-        <div class="debug-area">
-            <div class="debug-title">
-                <span>🔍 [除錯區] AI 原始輸出內容：</span>
-            </div>
-            <div id="debug-json">等待點餐解析...</div>
-        </div>
+    <!-- 模型載入狀態提示條 -->
+    <div v-if="!isModelReady" class="bg-amber-50 border border-amber-200 text-amber-800 p-3 rounded-xl text-xs space-y-1">
+      <div class="font-bold">⏳ 本地 AI 模型載入中：{{ loadProgress }}</div>
+      <div class="w-full bg-amber-200 h-1.5 rounded-full overflow-hidden">
+        <div class="bg-amber-600 h-full transition-all duration-300" :style="{ width: progressPercent + '%' }"></div>
+      </div>
     </div>
 
-    <script>
-        const CUSTOMER_DB = { "老黃": "黃大豪", "小陳": "陳小明", "阿民": "林國民" };
-        const PRICE_DB = { "咖啡": 80, "紅茶": 30, "綠茶": 30, "蛋餅": 40 };
+    <!-- 語音辨識即時顯示區 -->
+    <div class="bg-slate-50 border border-slate-200 p-4 rounded-xl space-y-1 min-h-[100px]">
+      <p class="text-xs text-slate-400 font-bold">即時語音轉文字：</p>
+      <p class="text-slate-800 font-medium text-base break-words">
+        {{ currentTranscript || '點擊下方按鈕開始說話...' }}
+      </p>
+    </div>
 
-        let engine = null;
-        let recognition = null;
-        let isListening = false;
-        let finalTranscript = "";
+    <!-- 錄音/點餐操作區 -->
+    <div class="flex flex-col items-center justify-center space-y-4 pt-2">
+      <button 
+        @click="toggleListening"
+        :disabled="isProcessing || !isModelReady"
+        :class="[
+          isListening ? 'bg-red-500 hover:bg-red-600 animate-pulse' : 'bg-indigo-600 hover:bg-indigo-700',
+          (isProcessing || !isModelReady) ? 'opacity-50 cursor-not-allowed' : ''
+        ]"
+        class="w-36 h-36 rounded-full text-white font-bold text-lg shadow-lg transition duration-200 flex flex-col items-center justify-center">
+        <span class="text-4xl mb-1">{{ isListening ? '⏹️' : '🎙️' }}</span>
+        <span>{{ isListening ? '講完請點我' : '按一下點餐' }}</span>
+      </button>
+      <p class="text-sm text-slate-600 font-medium h-6 text-center">
+        {{ statusMessage }}
+      </p>
+    </div>
+
+    <!-- AI 解析確認彈窗 Modal -->
+    <div v-if="showModal" class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+      <div class="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm space-y-4 border border-slate-100">
+        <h2 class="text-xl font-bold text-slate-800 border-b pb-2">請確認訂單資料</h2>
         
-        const modelId = "Qwen2.5-0.5B-Instruct-q4f16_1-MLC"; 
+        <div class="space-y-2 text-sm text-slate-600">
+          <div class="bg-indigo-50 p-2.5 rounded text-xs text-indigo-700 mb-2">
+            <strong>辨識句子：</strong>"{{ finalTranscript }}"
+          </div>
 
-        const actionBtn = document.getElementById('action-btn');
-        const statusText = document.getElementById('status-text');
-        const speechBox = document.getElementById('speech-box');
-        const progressEl = document.getElementById('download-progress');
-        const resultArea = document.getElementById('result-area');
-        const resCustomer = document.getElementById('res-customer');
-        const resItems = document.getElementById('res-items');
-        const resTotal = document.getElementById('res-total');
-        const debugJson = document.getElementById('debug-json');
+          <div class="flex justify-between">
+            <span class="font-bold">顧客姓名：</span>
+            <span class="text-indigo-600 font-semibold">{{ parsedOrder.customer_name || '未識別' }}</span>
+          </div>
+          
+          <div class="border-t my-2 pt-2">
+            <p class="font-bold mb-1">點餐品項：</p>
+            <ul class="space-y-1">
+              <li v-for="(item, index) in parsedOrder.items" :key="index" class="flex justify-between bg-slate-50 p-2 rounded">
+                <span>{{ item.name }} x {{ item.qty }}</span>
+                <span>NT$ {{ item.price * item.qty }}</span>
+              </li>
+            </ul>
+          </div>
 
-        async function initSystem() {
-            try {
-                if (!navigator.gpu) {
-                    statusText.innerText = "❌ 瀏覽器不支援 WebGPU，請使用 Chrome/Edge 或 iOS 17+ Safari。";
-                    actionBtn.innerText = "不支援此裝置硬體";
-                    progressEl.style.display = "none";
-                    return;
-                }
-                
-                setupSpeech();
+          <div class="flex justify-between text-base font-bold text-slate-800 border-t pt-2">
+            <span>總金額：</span>
+            <span class="text-emerald-600">NT$ {{ parsedOrder.total_amount || 0 }}</span>
+          </div>
+        </div>
 
-                statusText.innerText = "⏳ 正在初始化 WebLLM 引擎核心...";
-                
-                engine = await window.webllm.CreateMLCEngine(modelId, {
-                    initProgressCallback: (report) => {
-                        let percent = Math.round((report.progress || 0) * 100);
-                        progressEl.value = percent; 
-                        statusText.innerText = `🧠 AI 模型加載中... (${percent}%)`;
-                        actionBtn.innerText = `讀取中 ${percent}%`;
-                        
-                        if (percent >= 100) {
-                            progressEl.style.display = "none";
-                        }
-                    }
-                });
-                
-                statusText.innerText = "✅ 本地 AI 點餐系統已就緒";
-                actionBtn.innerText = "🎤 按一下 開始點餐";
-                actionBtn.disabled = false;
-            } catch (err) {
-                console.error("Initialization Error:", err);
-                statusText.innerText = "❌ 初始化失敗，請重刷網頁。";
-                debugJson.innerText = "初始化錯誤: " + err.message;
-                actionBtn.innerText = "系統錯誤";
-            }
-        }
+        <div class="flex space-x-3 pt-2">
+          <button @click="cancelOrder" class="flex-1 py-2.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl font-bold transition">
+            取消
+          </button>
+          <button @click="confirmOrder" class="flex-1 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-bold transition">
+            確認送出
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
 
-        function setupSpeech() {
-            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-            if (!SpeechRecognition) {
-                statusText.innerText = "⚠️ 瀏覽器不支援內建語音轉文字 API";
-                return;
-            }
-            
+  <script type="module">
+    import * as webllm from "https://esm.run/@mlc-ai/web-llm";
+
+    const { createApp, ref, onMounted } = Vue;
+
+    createApp({
+      setup() {
+        const isListening = ref(false);
+        const isProcessing = ref(false);
+        const statusMessage = ref('初始化中...');
+        const currentTranscript = ref('');
+        const finalTranscript = ref('');
+        const showModal = ref(false);
+        const parsedOrder = ref({});
+        
+        const isModelReady = ref(false);
+        const loadProgress = ref('準備載入模型...');
+        const progressPercent = ref(0);
+
+        let recognition = null;
+        let engine = null;
+
+        // 選用適合 iOS/行動裝置輕量化模型 (Qwen2.5 0.5B / Llama 3.2 1B)
+        const selectedModel = "Qwen2.5-0.5B-Instruct-q4f16_1-MLC";
+
+        onMounted(async () => {
+          // 1. 初始化 Web Speech API (採用第一版極穩定寫法)
+          const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+          if (SpeechRecognition) {
             recognition = new SpeechRecognition();
-            recognition.lang = 'zh-TW';
-            recognition.interimResults = true; 
             recognition.continuous = true;
+            recognition.interimResults = true;
+            recognition.lang = 'zh-TW';
 
             recognition.onresult = (event) => {
-                let interimTranscript = '';
-                for (let i = event.resultIndex; i < event.results.length; ++i) {
-                    if (event.results[i].isFinal) {
-                        finalTranscript += event.results[i].transcript;
-                    } else {
-                        interimTranscript += event.results[i].transcript;
-                    }
-                }
-                const currentText = finalTranscript || interimTranscript;
-                // 🗣️ 即時更新語音文字區塊
-                speechBox.innerText = "🗣️ 說話內容：" + (currentText || "（聆聽中...）");
+              let transcript = '';
+              for (let i = event.resultIndex; i < event.results.length; i++) {
+                transcript += event.results[i][0].transcript;
+              }
+              if (transcript.trim()) {
+                currentTranscript.value = transcript;
+              }
             };
 
-            recognition.onerror = (err) => {
-                console.warn("Speech Error:", err.error);
-                if (err.error === 'not-allowed') {
-                    alert("請允許網頁存取麥克風權限！");
-                    stopListening();
-                }
+            recognition.onerror = (event) => {
+              console.error('語音辨識錯誤:', event.error);
+              statusMessage.value = '語音辨識錯誤：' + event.error;
+              isListening.value = false;
             };
-        }
 
-        actionBtn.addEventListener('click', () => {
-            if (!isListening) {
-                isListening = true;
-                finalTranscript = "";
-                actionBtn.innerText = "請說話...";
-                actionBtn.classList.add('listening');
-                statusText.innerText = "🔴 錄音中... 說完請再按一下按鈕。";
-                speechBox.innerText = "🗣️ 說話內容：請開始說話...";
-                resultArea.style.display = "none";
-                debugJson.innerText = "等待 AI 回傳...";
-                
-                try { recognition.start(); } catch(e) {}
-            } else {
-                stopListening();
-            }
+            recognition.onend = () => {
+              if (isListening.value) {
+                try {
+                  recognition.start();
+                } catch(e) {
+                  console.log("自動重啟忽略");
+                }
+              }
+            };
+          } else {
+            alert('您的瀏覽器不支援 Web Speech API，請使用 Chrome 或 iOS Safari 瀏覽器。');
+          }
+
+          // 2. 初始化 WebLLM 本地模型
+          try {
+            statusMessage.value = '正在載入本地 AI 模型...';
+            engine = await webllm.CreateMLCEngine(
+              selectedModel,
+              {
+                initProgressCallback: (progress) => {
+                  loadProgress.value = progress.text;
+                  const match = progress.text.match(/\[(\d+)\/(\d+)\]/);
+                  if (match) {
+                    progressPercent.value = Math.round((parseInt(match[1]) / parseInt(match[2])) * 100);
+                  }
+                }
+              }
+            );
+            isModelReady.value = true;
+            statusMessage.value = '按一下麥克風開始點餐';
+          } catch (err) {
+            console.error('WebLLM 初始化失敗:', err);
+            statusMessage.value = '本地模型初始化失敗，請確保瀏覽器支援 WebGPU。';
+          }
         });
 
-        async function stopListening() {
-            isListening = false;
-            actionBtn.classList.remove('listening');
-            actionBtn.disabled = true;
-            statusText.innerText = "🧠 本地 GPU AI 正在解析點餐資訊...";
-            
-            try { recognition.stop(); } catch(e) {}
+        const systemPrompt = `你是一個 POS 點餐解析系統。請分析使用者輸入的點餐文字，並嚴格只輸出 JSON 格式。
 
-            const textToProcess = finalTranscript.trim();
-            if (!textToProcess) {
-                statusText.innerText = "⚠️ 沒有偵測到語音，請再試一次。";
-                actionBtn.innerText = "🎤 按一下 開始點餐";
-                actionBtn.disabled = false;
-                return;
-            }
+【顧客資料庫】：
+- "老黃" -> "黃大雄"
+- "小張" -> "張小明"
+- "陳姐" -> "陳美玲"
 
-            await askLocalAI(textToProcess);
-        }
+【菜單與價格】：
+- 咖啡: 80
+- 紅茶: 40
+- 綠茶: 40
+- 三明治: 65
+- 蛋餅: 35
 
-        async function askLocalAI(text) {
-            // 簡化系統 Prompt，給出更簡潔強烈的格式要求
-            const systemPrompt = `Task: Extract ordered items from Chinese text into JSON.
-Output MUST be pure JSON with no commentary.
-Format:
-{"customer":"name_or_unknown","items":[{"name":"item_name","count":1}]}
+【輸出 JSON 格式範例】：
+{
+  "customer_name": "黃大雄",
+  "items": [
+    {"name": "咖啡", "qty": 1, "price": 80}
+  ],
+  "total_amount": 80
+}`;
 
-Example Input: 老黃要兩杯咖啡
-Example Output: {"customer":"老黃","items":[{"name":"咖啡","count":2}]}`;
+        const toggleListening = async () => {
+          if (!recognition) return;
 
+          if (!isListening.value) {
+            currentTranscript.value = '';
             try {
-                const reply = await engine.chat.completions.create({
-                    messages: [
-                        { role: "system", content: systemPrompt },
-                        { role: "user", content: `Input: ${text}` }
-                    ],
-                    temperature: 0.1
-                });
-
-                // 取出 AI 的完整原始文字
-                const rawOutput = reply.choices[0].message.content.trim();
-                
-                // 🔍 呈現原汁原味的 AI 回傳於除錯區塊
-                debugJson.innerText = rawOutput;
-
-                // 🛠️ 使用正則表達式只抓取第一個 {...} JSON 區塊
-                const jsonMatch = rawOutput.match(/\{[\s\S]*\}/);
-                
-                if (jsonMatch) {
-                    const parsedData = JSON.parse(jsonMatch[0]);
-                    renderPOSResult(parsedData);
-                } else {
-                    throw new Error("模型回傳的文字中找不到標準 {} JSON 格式");
-                }
-
-            } catch (err) {
-                console.error("AI Parsing Error:", err);
-                statusText.innerText = "❌ 本地 AI 解析失敗，請看下方除錯區。";
-            } finally {
-                actionBtn.innerText = "🎤 按一下 開始點餐";
-                actionBtn.disabled = false;
+              recognition.start();
+              isListening.value = true;
+              statusMessage.value = '🎙️ 正在聆聽中...講完請再按一次';
+            } catch (e) {
+              console.error(e);
             }
-        }
+          } else {
+            isListening.value = false;
+            recognition.stop();
+            
+            // 延遲 300ms 確保 iOS Safari 寫入最後一段文字
+            await new Promise(resolve => setTimeout(resolve, 300));
 
-        function renderPOSResult(jsonData) {
-            // 容錯機制：顧客 Key 可能是 customer / name
-            const rawCust = jsonData.customer || jsonData.name || "未知";
-            const realCust = CUSTOMER_DB[rawCust] || rawCust;
-            resCustomer.innerText = `${realCust} (${rawCust})`;
+            const textToProcess = currentTranscript.value.trim();
+            finalTranscript.value = textToProcess;
 
-            let html = "";
-            let grandTotal = 0;
-
-            if (jsonData.items && Array.isArray(jsonData.items)) {
-                jsonData.items.forEach(item => {
-                    const itemName = item.name || item.item || "未知品項";
-                    // 容錯機制：數量 Key 可能是 count / qty / quantity
-                    const count = Number(item.count || item.qty || item.quantity || 1);
-                    const price = PRICE_DB[itemName] || 0;
-                    const subtotal = price * count;
-                    grandTotal += subtotal;
-
-                    html += `
-                        <div class="result-box">
-                            <span>☕ ${itemName} x ${count}</span>
-                            <span>小計: $${subtotal}</span>
-                        </div>`;
-                });
+            if (!textToProcess) {
+              statusMessage.value = '未聽見聲音，請再試一次。';
+              return;
             }
 
-            resItems.innerHTML = html;
-            resTotal.innerText = `總金額：$${grandTotal}`;
-            statusText.innerText = "✨ 結帳明細計算完畢！";
-            resultArea.style.display = "block";
-        }
+            await processTextWithLocalAI(textToProcess);
+          }
+        };
 
-        window.addEventListener('webllm-ready', () => {
-            initSystem();
-        });
+        const processTextWithLocalAI = async (textInput) => {
+          isProcessing.value = true;
+          statusMessage.value = '⚡ 本地端 AI 解析中...';
 
-        if (window.webllm) {
-            initSystem();
-        }
-    </script>
+          try {
+            const messages = [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: `使用者點餐文字：「${textInput}」` }
+            ];
+
+            const response = await engine.chat.completions.create({
+              messages,
+              temperature: 0.1,
+              response_format: { type: "json_object" }
+            });
+
+            const rawText = response.choices[0].message.content;
+            
+            // 提防 Local AI 在 JSON 外夾帶 markdown 標籤
+            const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+            if (!jsonMatch) throw new Error("模型未回傳正確 JSON 格式");
+
+            parsedOrder.value = JSON.parse(jsonMatch[0]);
+            showModal.value = true;
+            statusMessage.value = '解析完成！';
+
+          } catch (error) {
+            console.error('解析錯誤：', error);
+            alert('解析失敗：' + error.message);
+            statusMessage.value = '解析失敗，請再試一次。';
+          } finally {
+            isProcessing.value = false;
+          }
+        };
+
+        const confirmOrder = () => {
+          alert('訂單已確認送出！');
+          resetForm();
+        };
+
+        const cancelOrder = () => resetForm();
+
+        const resetForm = () => {
+          showModal.value = false;
+          currentTranscript.value = '';
+          statusMessage.value = '按一下麥克風開始點餐';
+        };
+
+        return {
+          isListening,
+          isProcessing,
+          statusMessage,
+          currentTranscript,
+          finalTranscript,
+          showModal,
+          parsedOrder,
+          isModelReady,
+          loadProgress,
+          progressPercent,
+          toggleListening,
+          confirmOrder,
+          cancelOrder
+        };
+      }
+    }).mount('#app');
+  </script>
 </body>
 </html>
