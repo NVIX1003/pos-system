@@ -22,13 +22,13 @@
       </div>
     </div>
 
-    <!-- 語音辨識即時顯示區 -->
-    <div class="bg-slate-50 border border-slate-200 p-4 rounded-xl space-y-1 min-h-[100px]">
-      <p class="text-xs text-slate-400 font-bold">即時語音轉文字：</p>
-      <p class="text-slate-800 font-medium text-base break-words">
-        {{ currentTranscript || '點擊下方按鈕開始說話...' }}
-      </p>
-    </div>
+<!-- 語音辨識即時顯示區 -->
+<div class="bg-slate-50 border border-slate-200 p-4 rounded-xl space-y-1 min-h-[100px]">
+  <p class="text-xs text-slate-400 font-bold">即時語音轉文字：</p>
+  <p class="text-slate-800 font-medium text-2xl break-words">
+    {{ currentTranscript || '點擊下方按鈕開始說話...' }}
+  </p>
+</div>
 
     <!-- 錄音/點餐操作區 -->
     <div class="flex flex-col items-center justify-center space-y-4 pt-2">
@@ -177,19 +177,17 @@
           }
         });
 
-        const systemPrompt = `你是一個 POS 點餐解析系統。請點餐文字嚴格只輸出 JSON 格式，不要包含任何額外說明文字或 Markdown 標籤。
+        const systemPrompt = `Task: Parse drink order into pure JSON.
+Output format MUST be strictly:
+{"customer_name":"string","items":[{"name":"string","qty":number}]}
 
-【菜單與價格】：
-咖啡, 紅茶, 綠茶, 三明治, 蛋餅
+Menu: 咖啡, 紅茶, 綠茶, 三明治, 蛋餅
 
-【重要規則】：
-1. 提取顧客稱呼（如：老黃、小張、陳姐），原樣輸出即可。
-2. 必須完整提取句子中提到的「所有」品項與數量，不可遺漏。
-3. 只輸出純 JSON，不要加任何解釋。
+Examples:
+Input: 老黃10杯咖啡2杯紅茶3杯綠茶
+Output: {"customer_name":"老黃","items":[{"name":"咖啡","qty":10},{"name":"紅茶","qty":2},{"name":"綠茶","qty":3}]}
 
-【範例】：
-輸入：老黃兩杯咖啡一杯紅茶一杯綠茶
-輸出：{"customer_name":"老黃","items":[{"name":"咖啡","qty":2},{"name":"紅茶","qty":1},{"name":"綠茶","qty":1}]}`;
+Rule: Output ONLY valid JSON, no extra text.`;
 
         const toggleListening = async () => {
           if (!recognition) return;
@@ -266,15 +264,22 @@ const processTextWithLocalAI = async (textInput) => {
             const response = await engine.chat.completions.create({
               messages,
               temperature: 0.0 // 設為 0，讓輸出最穩定且確定
+              max_tokens: 150, // 確保給予足夠長度輸出完 JSON
+              stop: ["\n\n", "```"] // 避免生成多餘贅字
             });
 
             const rawText = response.choices[0].message.content;
+            console.log("模型原始輸出：", rawText); // 建議印出日誌方便除錯
             
-            // 抓取 JSON 區塊
+            // 使用更嚴謹的 JSON 抓取邏輯
             const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-            if (!jsonMatch) throw new Error("模型未回傳正確 JSON 格式");
+            if (!jsonMatch) {
+              throw new Error("模型未回傳 JSON 結構，原始輸出：" + rawText);
+            }
 
-            const rawResult = JSON.parse(jsonMatch[0]);
+            // 清除可能殘留的控制字元後再 Parse
+            const cleanJsonStr = jsonMatch[0].replace(/[\u0000-\u001F\u007F-\u009F]/g, "");
+            const rawResult = JSON.parse(cleanJsonStr);
 
             // 🛠️ 關鍵優化：用 JavaScript 進行補全與精準計算，避免 AI 算錯金額
             let calculatedTotal = 0;
