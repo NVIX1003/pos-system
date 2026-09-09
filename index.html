@@ -11,8 +11,8 @@
 
   <div id="app" class="w-full max-w-md bg-white rounded-2xl shadow-xl p-6 space-y-6 relative">
     
-    <h1 class="text-2xl font-bold text-slate-800 text-center pt-2">Welcome to NVIXPOS</h1>
-    <p class="text-xs text-center text-slate-500">（純本地端運算 - WebLLM）</p>
+    <h1 class="text-2xl font-bold text-slate-800 text-center pt-2">歡迎使用 NVIX 點餐系統</h1>
+    <p class="text-xs text-center text-slate-500">（本地運算模型：Qwen2.5-0.5B）</p>
 
     <!-- 模型載入狀態提示條 -->
     <div v-if="!isModelReady" class="bg-amber-50 border border-amber-200 text-amber-800 p-3 rounded-xl text-xs space-y-1">
@@ -178,28 +178,18 @@
         });
 
         const systemPrompt = `你是一個 POS 點餐解析系統。請點餐文字嚴格只輸出 JSON 格式，不要包含任何額外說明文字或 Markdown 標籤。
-必須嚴格遵守以下對照表：
-
-【顧客資料庫】：
-- "老黃" -> "黃大雄"
-- "小張" -> "張小明"
-- "陳姐" -> "陳美玲"
 
 【菜單與價格】：
 咖啡, 紅茶, 綠茶, 三明治, 蛋餅
 
 【重要規則】：
-1. 顧客姓名必須轉換為資料庫全名（例如：老黃 必須輸出為 黃大雄）。
+1. 提取顧客稱呼（如：老黃、小張、陳姐），原樣輸出即可。
 2. 必須完整提取句子中提到的「所有」品項與數量，不可遺漏。
 3. 只輸出純 JSON，不要加任何解釋。
 
-【範例 1】：
+【範例】：
 輸入：老黃兩杯咖啡一杯紅茶一杯綠茶
-輸出：{"customer_name":"黃大雄","items":[{"name":"咖啡","qty":2},{"name":"紅茶","qty":1},{"name":"綠茶","qty":1}]}
-
-【範例 2】：
-輸入：小張一個三明治
-輸出：{"customer_name":"張小明","items":[{"name":"三明治","qty":1}]}`;
+輸出：{"customer_name":"老黃","items":[{"name":"咖啡","qty":2},{"name":"紅茶","qty":1},{"name":"綠茶","qty":1}]}
 
         const toggleListening = async () => {
           if (!recognition) return;
@@ -232,7 +222,14 @@
           }
         };
 
-// 在外層定義價格資料庫，讓 JS 直接算錢
+// 顧客名稱資料庫
+        const CUSTOMER_MAP = {
+          "老黃": "黃大雄",
+          "小張": "張小明",
+          "陳姐": "陳美玲"
+        };
+        
+// 商品價格資料庫
         const PRICE_MAP = {
           "咖啡": 80,
           "紅茶": 40,
@@ -277,9 +274,15 @@
               };
             });
 
+            // 抓出 AI 提取原始名稱（例如："老黃"）
+            const rawCustomerName = rawResult.customer_name || '未識別';
+            
+            // 先去資料庫查全名，查不到就保留原名
+            const mappedCustomerName = CUSTOMER_MAP[rawCustomerName] || rawCustomerName;
+
             // 組合出最終精確的訂單資料
             parsedOrder.value = {
-              customer_name: rawResult.customer_name || '未識別',
+              customer_name: mappedCustomerName,
               items: processedItems,
               total_amount: calculatedTotal
             };
