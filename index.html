@@ -1,303 +1,174 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>語音 POS 點餐系統</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>本地語音 POS 系統</title>
+    <!-- 引入 WebLLM 瀏覽器本地 AI 核心 -->
+    <script type="module">
+        import * as webllm from "https://esm.run";
+        window.webllm = webllm;
+    </script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; background: #f5f5f7; }
+        .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 20px; }
+        button { width: 100%; padding: 12px; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; margin-bottom: 10px; }
+        .btn-speech { background: #0071e3; color: white; }
+        .btn-ai { background: #34c759; color: white; }
+        #status { color: #86868b; font-size: 14px; margin-top: 5px; text-align: center; }
+        pre { background: #f0f0f2; padding: 10px; border-radius: 6px; overflow-x: auto; font-size: 14px; }
+        .result-box { display: flex; justify-content: space-between; border-bottom: 1px solid #eee; padding: 8px 0; }
+        .total { font-size: 20px; font-weight: bold; color: #ff3b30; text-align: right; margin-top: 15px; }
+    </style>
 </head>
-<body class="bg-slate-100 min-h-screen p-4 flex flex-col items-center justify-center">
+<body>
 
-  <div id="app" class="w-full max-w-md bg-white rounded-2xl shadow-xl p-6 space-y-6 relative">
-    
-    <!-- 右上角設定按鈕 -->
-    <button @click="promptApiKey" class="absolute top-4 right-4 text-xs bg-slate-100 hover:bg-slate-200 text-slate-600 px-3 py-1.5 rounded-lg border border-slate-300 font-medium transition">
-      ⚙️ {{ apiKey ? '重設 Key' : '設定 Key' }}
-    </button>
-
-    <h1 class="text-2xl font-bold text-slate-800 text-center pt-2">🎤 語音 POS 點餐系統</h1>
-
-    <!-- 未設定 API Key 警示 -->
-    <div v-if="!apiKey" class="bg-amber-50 border border-amber-200 text-amber-800 p-3 rounded-xl text-xs text-center">
-      ⚠️ 尚未設定 Gemini API Key，請點擊右上角「設定 Key」進行設定。
+    <div class="card">
+        <h2>🎤 第一步：語音輸入</h2>
+        <button class="btn-speech" id="start-speech">開始語音辨識</button>
+        <p><strong>辨識結果：</strong> <span id="speech-text" style="color:#0071e3;">尚未輸入</span></p>
     </div>
 
-    <!-- 語音辨識即時顯示區 -->
-    <div class="bg-slate-50 border border-slate-200 p-4 rounded-xl space-y-1 min-h-[100px]">
-      <p class="text-xs text-slate-400 font-bold">即時語音轉文字：</p>
-      <p class="text-slate-800 font-medium text-base break-words">
-        {{ currentTranscript || '點擊下方按鈕開始說話...' }}
-      </p>
+    <div class="card">
+        <h2>🧠 第二步：本地 AI 結構化提取</h2>
+        <button class="btn-ai" id="run-ai" disabled>等待 AI 初始化...</button>
+        <div id="status">正在載入 WebLLM 引擎...</div>
+        <h3>AI 輸出的原始 JSON：</h3>
+        <pre id="json-output">{}</pre>
     </div>
 
-    <!-- 錄音/點餐操作區 -->
-    <div class="flex flex-col items-center justify-center space-y-4 pt-2">
-      <button 
-        @click="toggleListening"
-        :disabled="isProcessing || !apiKey"
-        :class="[
-          isListening ? 'bg-red-500 hover:bg-red-600 animate-pulse' : 'bg-indigo-600 hover:bg-indigo-700',
-          (isProcessing || !apiKey) ? 'opacity-50 cursor-not-allowed' : ''
-        ]"
-        class="w-36 h-36 rounded-full text-white font-bold text-lg shadow-lg transition duration-200 flex flex-col items-center justify-center">
-        <span class="text-4xl mb-1">{{ isListening ? '⏹️' : '🎙️' }}</span>
-        <span>{{ isListening ? '講完請點我' : '按一下點餐' }}</span>
-      </button>
-      <p class="text-sm text-slate-600 font-medium h-6 text-center">
-        {{ statusMessage }}
-      </p>
-    </div>
-
-    <!-- AI 解析確認彈窗 Modal -->
-    <div v-if="showModal" class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-      <div class="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm space-y-4 border border-slate-100">
-        <h2 class="text-xl font-bold text-slate-800 border-b pb-2">請確認訂單資料</h2>
-        
-        <div class="space-y-2 text-sm text-slate-600">
-          <div class="bg-indigo-50 p-2.5 rounded text-xs text-indigo-700 mb-2">
-            <strong>辨識句子：</strong>"{{ currentTranscript }}"
-          </div>
-
-          <div class="flex justify-between">
-            <span class="font-bold">顧客姓名：</span>
-            <span class="text-indigo-600 font-semibold">{{ parsedOrder.customer_name || '未識別' }}</span>
-          </div>
-          
-          <div class="border-t my-2 pt-2">
-            <p class="font-bold mb-1">點餐品項：</p>
-            <ul class="space-y-1">
-              <li v-for="(item, index) in parsedOrder.items" :key="index" class="flex justify-between bg-slate-50 p-2 rounded">
-                <span>{{ item.name }} x {{ item.qty }}</span>
-                <span>NT$ {{ item.price * item.qty }}</span>
-              </li>
-            </ul>
-          </div>
-
-          <div class="flex justify-between text-base font-bold text-slate-800 border-t pt-2">
-            <span>總金額：</span>
-            <span class="text-emerald-600">NT$ {{ parsedOrder.total_amount }}</span>
-          </div>
+    <div class="card">
+        <h2>💰 第三步：POS 資料庫對照結果</h2>
+        <div id="pos-results">
+            <p style="color:#86868b;">等待 AI 提取資料...</p>
         </div>
-
-        <div class="flex space-x-3 pt-2">
-          <button @click="cancelOrder" class="flex-1 py-2.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl font-bold transition">
-            取消
-          </button>
-          <button @click="confirmOrder" class="flex-1 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-bold transition">
-            確認送出
-          </button>
-        </div>
-      </div>
+        <div class="total" id="pos-total">總金額：$0</div>
     </div>
-  </div>
 
-  <script>
-    const { createApp, ref, onMounted } = Vue;
+    <script>
+        // --- 模擬本地資料庫 ---
+        const CUSTOMER_DB = { "老黃": "黃小名", "小陳": "陳大明" };
+        const PRICE_DB = { "咖啡": 80, "紅茶": 30, "綠茶": 30, "蛋餅": 40 };
 
-    createApp({
-      setup() {
-        const apiKey = ref('');
-        const isListening = ref(false);
-        const isProcessing = ref(false);
-        const statusMessage = ref('點擊麥克風開始點餐');
-        const currentTranscript = ref('');
-        const showModal = ref(false);
-        const parsedOrder = ref({});
+        let engine = null;
+        // 使用 Qwen2.5-Coder-1.5B (WebLLM 內建支援網頁 WebGPU 執行的輕量首選)
+        const modelId = "Qwen2.5-Coder-1.5B-Instruct-q4f16_1-MLC"; 
 
-        let recognition = null;
+        const startSpeechBtn = document.getElementById('start-speech');
+        const runAiBtn = document.getElementById('run-ai');
+        const speechTextEl = document.getElementById('speech-text');
+        const jsonOutputEl = document.getElementById('json-output');
+        const statusEl = document.getElementById('status');
+        const posResultsEl = document.getElementById('pos-results');
+        const posTotalEl = document.getElementById('pos-total');
 
-        onMounted(() => {
-          // 自動從瀏覽器儲存區讀取 Key
-          const savedKey = localStorage.getItem('gemini_api_key');
-          if (savedKey) {
-            apiKey.value = savedKey;
-          } else {
-            statusMessage.value = '請先設定 API Key';
-          }
-
-          const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-          if (SpeechRecognition) {
-            recognition = new SpeechRecognition();
-            recognition.continuous = true;
-            recognition.interimResults = true;
-            recognition.lang = 'zh-TW';
-
-            recognition.onresult = (event) => {
-              let transcript = '';
-              for (let i = event.resultIndex; i < event.results.length; i++) {
-                transcript += event.results[i][0].transcript;
-              }
-              if (transcript.trim()) {
-                currentTranscript.value = transcript;
-              }
-            };
-
-            recognition.onerror = (event) => {
-              console.error('語音辨識錯誤:', event.error);
-              statusMessage.value = '語音辨識錯誤：' + event.error;
-              isListening.value = false;
-            };
-
-            recognition.onend = () => {
-              if (isListening.value) {
-                recognition.start();
-              }
-            };
-          } else {
-            alert('您的瀏覽器不支援 Web Speech API，請使用 Chrome 或 Safari 瀏覽器。');
-          }
-        });
-
-        const promptApiKey = () => {
-          const input = prompt('請輸入您的 Gemini API Key（Key 會儲存在此裝置的瀏覽器中）：', apiKey.value);
-          if (input !== null) {
-            apiKey.value = input.trim();
-            localStorage.setItem('gemini_api_key', input.trim());
-            if (apiKey.value) {
-              statusMessage.value = 'API Key 設定成功，點擊麥克風開始點餐';
-            }
-          }
-        };
-
-        const systemPrompt = `你是一個 POS 點餐解析系統。請分析使用者輸入的點餐文字，並對照以下資料庫進行結構化解析：
-
-【顧客資料庫】：
-- "老黃" -> "黃大雄"
-- "小張" -> "張小明"
-- "陳姐" -> "陳美玲"
-
-【菜單與價格】：
-- 咖啡: NT$ 80
-- 紅茶: NT$ 40
-- 綠茶: NT$ 40
-- 三明治: NT$ 65
-- 蛋餅: NT$ 35
-
-【規則】：
-1. 請嚴格僅對照文字中提到的品項與顧客，未提到的品項絕對不可以出現在 items 清單中。
-2. 計算 total_amount 時，必須精準為所有 items 的 (price * qty) 總和。`;
-
-        const toggleListening = async () => {
-          if (!apiKey.value) {
-            promptApiKey();
-            return;
-          }
-
-          if (!recognition) return;
-
-          if (!isListening.value) {
-            currentTranscript.value = '';
+        // --- 1. 初始化 WebLLM 本地 AI Engine ---
+        async function initAI() {
             try {
-              recognition.start();
-              isListening.value = true;
-              statusMessage.value = '🎙️ 正在聆聽中...講完請再按一次';
-            } catch (e) {
-              console.error(e);
-            }
-          } else {
-            isListening.value = false;
-            recognition.stop();
-            
-            if (!currentTranscript.value.trim()) {
-              statusMessage.value = '未聽見聲音，請再試一次。';
-              return;
-            }
-
-            await processTextWithGemini(currentTranscript.value);
-          }
-        };
-
-        const processTextWithGemini = async (textInput) => {
-          isProcessing.value = true;
-          statusMessage.value = '⚡ 文字傳送給 Gemini 解析中...';
-
-          try {
-            const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey.value.trim()}`;
-
-            const requestBody = {
-              contents: [{
-                parts: [
-                  { text: `${systemPrompt}\n\n使用者點餐文字：「${textInput}」` }
-                ]
-              }],
-              generationConfig: {
-                response_mime_type: "application/json",
-                response_schema: {
-                  type: "OBJECT",
-                  properties: {
-                    customer_name: { type: "STRING" },
-                    items: {
-                      type: "ARRAY",
-                      items: {
-                        type: "OBJECT",
-                        properties: {
-                          name: { type: "STRING" },
-                          qty: { type: "INTEGER" },
-                          price: { type: "INTEGER" }
-                        },
-                        required: ["name", "qty", "price"]
-                      }
-                    },
-                    total_amount: { type: "INTEGER" }
-                  },
-                  required: ["items", "total_amount"]
+                if (!navigator.gpu) {
+                    statusEl.innerText = "❌ 您的瀏覽器不支援 WebGPU（請用 iOS 17+ Safari 或 Chrome 測試）";
+                    return;
                 }
-              }
-            };
+                statusEl.innerText = "⏳ 正在初始化本地 AI 模型（首次載入需下載約 1GB 數據，隨後會快取在瀏覽器中）...";
+                
+                engine = await window.webllm.CreateEngine(modelId, {
+                    initProgressCallback: (report) => {
+                        statusEl.innerText = `模型載入中: ${Math.round(report.progress * 100)}% - ${report.text}`;
+                    }
+                });
+                
+                statusEl.innerText = "✅ 本地 AI 載入完成！隨時可以點餐。";
+                runAiBtn.disabled = false;
+            } catch (err) {
+                statusEl.innerText = "❌ 載入失敗: " + err.message;
+            }
+        }
 
-            const response = await fetch(endpoint, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(requestBody)
+        // --- 2. 語音辨識 (Web Speech API) ---
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (SpeechRecognition) {
+            const recognition = new SpeechRecognition();
+            recognition.lang = 'zh-TW';
+            recognition.interimResults = false;
+
+            startSpeechBtn.addEventListener('click', () => {
+                recognition.start();
+                statusEl.innerText = "🎤 聆聽中，請說話... (例如：老黃一杯咖啡，三杯紅茶)";
             });
 
-            const data = await response.json();
-            if (data.error) throw new Error(data.error.message);
+            recognition.onresult = (event) => {
+                const text = event.results[0][0].transcript;
+                speechTextEl.innerText = text;
+                statusEl.innerText = "🗣️ 語音辨識成功！請點擊下方綠色按鈕交給 AI 處理。";
+            };
+        } else {
+            startSpeechBtn.innerText = "不支援語音辨識 (請用 iPhone Safari)";
+        }
 
-            const resultObj = JSON.parse(data.candidates[0].content.parts[0].text);
+        // --- 3. 呼叫本地 AI 進行 JSON 提取 ---
+        runAiBtn.addEventListener('click', async () => {
+            const inputText = speechTextEl.innerText;
+            if (inputText === "尚未輸入") return;
 
-            parsedOrder.value = resultObj;
-            showModal.value = true;
-            statusMessage.value = '解析完成！';
+            statusEl.innerText = "🧠 本地 AI 正在強力提取中（由手機 GPU 離線推論）...";
+            runAiBtn.disabled = true;
 
-          } catch (error) {
-            console.error('解析錯誤：', error);
-            alert('解析失敗：' + error.message);
-            statusMessage.value = '解析失敗，請再試一次。';
-          } finally {
-            isProcessing.value = false;
-          }
-        };
+            const systemPrompt = `You are a precise POS parser. Strictly obey these grammar alignment rules:
+1. In Chinese ordering phrasing, numbers and units ALWAYS appear BEFORE the item name (e.g., "三杯紅茶" means 3 Black Tea). Never misalign them.
+2. Output ONLY raw valid JSON, no markdown code block, no conversational words.
+Format: {"customer": "name", "items": [{"name": "item", "count": integer}]}`;
 
-        const confirmOrder = () => {
-          alert('訂單已確認送出！');
-          resetForm();
-        };
+            try {
+                const reply = await engine.chat.completions.create({
+                    messages: [
+                        { role: "system", content: systemPrompt },
+                        { role: "user", content: Text: ${inputText} }
+                    ],
+                    temperature: 0.0 // 鎖定最低溫度，防止數量搞錯
+                });
 
-        const cancelOrder = () => resetForm();
+                const rawJsonText = reply.choices[0].message.content.trim();
+                jsonOutputEl.innerText = rawJsonText;
+                
+                // --- 4. 解析 JSON 並對照資料庫計算金額 ---
+                processOrder(JSON.parse(rawJsonText));
+                statusEl.innerText = "✨ 點餐成功！金額已自動計算。";
+            } catch (err) {
+                statusEl.innerText = "❌ AI 處理出錯: " + err.message;
+            } finally {
+                runAiBtn.disabled = false;
+            }
+        });
 
-        const resetForm = () => {
-          showModal.value = false;
-          currentTranscript.value = '';
-          statusMessage.value = '按一下麥克風開始點餐';
-        };
+        // --- 5. 處理訂單邏輯 (對照本地 DB) ---
+        function processOrder(data) {
+            const rawCustomer = data.customer || "未知顧客";
+            // 查表：老黃 -> 黃叉叉
+            const realCustomer = CUSTOMER_DB[rawCustomer] || rawCustomer; 
+            
+            let html = `<p><strong>實名顧客：</strong> ${realCustomer} (${rawCustomer})</p><h3>點餐明細：</h3>`;
+            let totalSum = 0;
 
-        return {
-          apiKey,
-          isListening,
-          isProcessing,
-          statusMessage,
-          currentTranscript,
-          showModal,
-          parsedOrder,
-          toggleListening,
-          confirmOrder,
-          cancelOrder,
-          promptApiKey
-        };
-      }
-    }).mount('#app');
-  </script>
+            if (data.items && Array.isArray(data.items)) {
+                data.items.forEach(item => {
+                    const price = PRICE_DB[item.name] || 0; // 查表：咖啡 -> 80 元
+                    const subtotal = price * item.count;
+                    totalSum += subtotal;
+                    
+                    html += `
+                        <div class="result-box">
+                            <span>☕ ${item.name} x ${item.count}</span>
+                            <span>$${price}/杯 (小計: $${subtotal})</span>
+                        </div>`;
+                });
+            }
+
+            posResultsEl.innerHTML = html;
+            posTotalEl.innerText = `總金額：$${totalSum}`;
+        }
+
+        // 頁面開啟時自動加載本地 AI
+        window.addEventListener('load', initAI);
+    </script>
 </body>
 </html>
