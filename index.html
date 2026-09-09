@@ -22,13 +22,13 @@
       </div>
     </div>
 
-<!-- 語音辨識即時顯示區 -->
-<div class="bg-slate-50 border border-slate-200 p-4 rounded-xl space-y-1 min-h-[100px]">
-  <p class="text-xs text-slate-400 font-bold">即時語音轉文字：</p>
-  <p class="text-slate-800 font-medium text-2xl break-words">
-    {{ currentTranscript || '點擊下方按鈕開始說話...' }}
-  </p>
-</div>
+    <!-- 語音辨識即時顯示區 -->
+    <div class="bg-slate-50 border border-slate-200 p-4 rounded-xl space-y-1 min-h-[100px]">
+      <p class="text-xs text-slate-400 font-bold">即時語音轉文字：</p>
+      <p class="text-slate-800 font-medium text-2xl break-words">
+        {{ currentTranscript || '點擊下方按鈕開始說話...' }}
+      </p>
+    </div>
 
     <!-- 錄音/點餐操作區 -->
     <div class="flex flex-col items-center justify-center space-y-4 pt-2">
@@ -54,8 +54,6 @@
         <h2 class="text-xl font-bold text-slate-800 border-b pb-2">請確認訂單資料</h2>
         
         <div class="space-y-2 text-sm text-slate-600">
-          
-
           <div class="flex justify-between">
             <span class="font-bold">顧客姓名：</span>
             <span class="text-indigo-600 font-semibold">{{ parsedOrder.customer_name || '未識別' }}</span>
@@ -111,11 +109,10 @@
         let recognition = null;
         let engine = null;
 
-        // 選用適合 iOS/行動裝置輕量化模型 (Qwen2.5 0.5B / Llama 3.2 1B)
         const selectedModel = "Qwen2.5-0.5B-Instruct-q4f16_1-MLC";
 
         onMounted(async () => {
-          // 1. 初始化 Web Speech API (採用第一版極穩定寫法)
+          // 1. 初始化 Web Speech API (僅建立一次實例以減少 iOS 權限提示頻率)
           const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
           if (SpeechRecognition) {
             recognition = new SpeechRecognition();
@@ -134,8 +131,10 @@
             };
 
             recognition.onerror = (event) => {
-              console.error('語音辨識錯誤:', event.error);
-              statusMessage.value = '語音辨識錯誤：' + event.error;
+              if (event.error !== 'no-speech') {
+                console.error('語音辨識錯誤:', event.error);
+                statusMessage.value = '語音辨識錯誤：' + event.error;
+              }
               isListening.value = false;
             };
 
@@ -203,7 +202,6 @@ Rule: Output ONLY valid JSON, no extra text.`;
             isListening.value = false;
             recognition.stop();
             
-            // 延遲 300ms 確保 iOS Safari 寫入最後一段文字
             await new Promise(resolve => setTimeout(resolve, 300));
 
             const textToProcess = currentTranscript.value.trim();
@@ -218,14 +216,12 @@ Rule: Output ONLY valid JSON, no extra text.`;
           }
         };
 
-// 顧客名稱資料庫
         const CUSTOMER_MAP = {
           "老黃": "黃大雄",
           "小張": "張小明",
           "陳姐": "陳美玲"
         };
         
-// 商品價格資料庫
         const PRICE_MAP = {
           "咖啡": 80,
           "紅茶": 40,
@@ -234,52 +230,45 @@ Rule: Output ONLY valid JSON, no extra text.`;
           "手沖": 100
         };
 
-        // 簡易中文數字轉阿拉伯數字與正規化函式
-function normalizeText(text) {
-  const cnNums = { '一': '1', '二': '2', '兩': '2', '三': '3', '四': '4', '五': '5', '六': '6', '七': '7', '八': '8', '九': '9', '十': '10' };
-  
-  let result = text;
-  // 將常見中文數字替換為阿拉伯數字
-  for (const [cn, num] of Object.entries(cnNums)) {
-    result = result.replaceAll(cn, num);
-  }
-  return result;
-}
+        function normalizeText(text) {
+          const cnNums = { '一': '1', '二': '2', '兩': '2', '三': '3', '四': '4', '五': '5', '六': '6', '七': '7', '八': '8', '九': '9', '十': '10' };
+          let result = text;
+          for (const [cn, num] of Object.entries(cnNums)) {
+            result = result.replaceAll(cn, num);
+          }
+          return result;
+        }
 
-const processTextWithLocalAI = async (textInput) => {
-  isProcessing.value = true;
-  statusMessage.value = '⚡ 本地端 AI 解析中...';
+        const processTextWithLocalAI = async (textInput) => {
+          isProcessing.value = true;
+          statusMessage.value = '⚡ 本地端 AI 解析中...';
 
-  // 1. 先將輸入文字正規化 (如："小張10杯咖啡1杯紅茶1杯綠茶")
-  const cleanedInput = normalizeText(textInput);
+          const cleanedInput = normalizeText(textInput);
 
-  try {
-    const messages = [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: `輸入：${cleanedInput}` } // 帶入正規化後的文字
-    ];
+          try {
+            const messages = [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: `輸入：${cleanedInput}` }
+            ];
 
             const response = await engine.chat.completions.create({
               messages,
-              temperature: 0.0, // 設為 0，讓輸出最穩定且確定
-              max_tokens: 150, // 確保給予足夠長度輸出完 JSON
-              stop: ["\n\n", "```"] // 避免生成多餘贅字
+              temperature: 0.0,
+              max_tokens: 150,
+              stop: ["\n\n", "```"]
             });
 
             const rawText = response.choices[0].message.content;
-            console.log("模型原始輸出：", rawText); // 建議印出日誌方便除錯
+            console.log("模型原始輸出：", rawText);
             
-            // 使用更嚴謹的 JSON 抓取邏輯
             const jsonMatch = rawText.match(/\{[\s\S]*\}/);
             if (!jsonMatch) {
               throw new Error("模型未回傳 JSON 結構，原始輸出：" + rawText);
             }
 
-            // 清除可能殘留的控制字元後再 Parse
             const cleanJsonStr = jsonMatch[0].replace(/[\u0000-\u001F\u007F-\u009F]/g, "");
             const rawResult = JSON.parse(cleanJsonStr);
 
-            // 🛠️ 關鍵優化：用 JavaScript 進行補全與精準計算，避免 AI 算錯金額
             let calculatedTotal = 0;
             const processedItems = (rawResult.items || []).map(item => {
               const price = PRICE_MAP[item.name] || 0;
@@ -292,13 +281,9 @@ const processTextWithLocalAI = async (textInput) => {
               };
             });
 
-            // 抓出 AI 提取原始名稱（例如："老黃"）
             const rawCustomerName = rawResult.customer_name || '未識別';
-            
-            // 先去資料庫查全名，查不到就保留原名
             const mappedCustomerName = CUSTOMER_MAP[rawCustomerName] || rawCustomerName;
 
-            // 組合出最終精確的訂單資料
             parsedOrder.value = {
               customer_name: mappedCustomerName,
               items: processedItems,
