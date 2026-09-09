@@ -177,7 +177,7 @@
           }
         });
 
-        const systemPrompt = `你是一個 POS 點餐解析系統。請分析使用者輸入的點餐文字，並嚴格只輸出 JSON 格式。
+        const systemPrompt = `你是一個 POS 點餐解析系統。請分析使用者輸入的點餐文字，並嚴格只輸出 JSON 格式，不要包含任何額外說明文字或 Markdown 標籤。
 
 【顧客資料庫】：
 - "老黃" -> "黃大雄"
@@ -244,7 +244,6 @@
             const response = await engine.chat.completions.create({
               messages,
               temperature: 0.1,
-              response_format: { type: "json_object" }
             });
 
             const rawText = response.choices[0].message.content;
