@@ -3,13 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>智慧語音點餐 POS</title>
-    <!-- 強制破壞快取標籤 -->
+    <title>NVIX POS</title>
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     
-    <!-- 引入 WebLLM 瀏覽器本地 AI 核心 -->
     <script type="module">
         import * as webllm from "https://esm.run";
         window.webllm = webllm;
@@ -18,12 +16,15 @@
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 30px 20px; max-width: 500px; margin: 0 auto; background: #f5f5f7; display: flex; flex-direction: column; min-height: 80vh; justify-content: center; }
         .card { background: white; padding: 25px; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.08); text-align: center; }
         
-        /* 核心大按鈕樣式 */
         .main-btn { width: 100%; min-height: 90px; padding: 15px; border: none; border-radius: 50px; font-size: 18px; font-weight: bold; cursor: pointer; color: white; background: #0071e3; transition: all 0.3s ease; box-shadow: 0 4px 15px rgba(0,113,227,0.3); margin-bottom: 25px; word-break: break-all; }
         .main-btn:disabled { background: #86868b; box-shadow: none; cursor: not-allowed; }
         .main-btn.listening { background: #ff3b30; animation: pulse 1.5s infinite; box-shadow: 0 4px 15px rgba(255,59,48,0.4); }
         
         #status-text { color: #86868b; font-size: 14px; margin-bottom: 10px; font-weight: 500; }
+        
+        /* 🛠️ 新增：進度條樣式 */
+        progress { width: 100%; height: 12px; border-radius: 6px; overflow: hidden; margin-bottom: 15px; display: block; }
+        
         .result-section { border-top: 2px dashed #e5e5ea; padding-top: 20px; margin-top: 10px; text-align: left; display: none; }
         .result-box { display: flex; justify-content: space-between; border-bottom: 1px solid #f2f2f7; padding: 10px 0; font-size: 16px; }
         .total { font-size: 24px; font-weight: bold; color: #ff3b30; text-align: right; margin-top: 20px; }
@@ -39,12 +40,15 @@
 
     <div class="card">
         <!-- 狀態小提示 -->
-        <div id="status-text">⏳ 正在載入本地 AI 點餐大腦...</div>
+        <div id="status-text">⏳ 正在載入本地 AI 模型來進行後續點餐...</div>
+        
+        <!-- 🛠️ 新增：視覺化百分比進度條 -->
+        <progress id="download-progress" value="0" max="100"></progress>
         
         <!-- 全網頁唯一的互動大按鈕 -->
         <button class="main-btn" id="action-btn" disabled>請稍候...</button>
 
-        <!-- 最終結果呈現區（中間的 JSON 和文字流程都被隱藏） -->
+        <!-- 最終結果呈現區 -->
         <div class="result-section" id="result-area">
             <p style="font-size: 16px;"><strong>顧客姓名：</strong> <span id="res-customer" style="color:#0071e3;">-</span></p>
             <h3 style="margin-top: 15px; margin-bottom: 10px; font-size: 16px; color:#1d1d1f;">點餐明細</h3>
@@ -54,46 +58,51 @@
     </div>
 
     <script>
-        // --- 本地對照資料庫 ---
-        const CUSTOMER_DB = { "老黃": "黃叉叉", "陳董": "陳大明", "阿民": "林國民" };
-        const PRICE_DB = { "咖啡": 80, "紅茶": 30, "綠茶": 30, "蛋餅": 40 };
+        const CUSTOMER_DB = { "老黃": "黃大豪", "小陳": "陳小明", "阿民": "林國民" };
+        const PRICE_DB = { "咖啡": 80, "紅茶": 30, "綠茶": 30, "拿鐵": 80 };
 
         let engine = null;
         let recognition = null;
         let isListening = false;
         let finalTranscript = "";
         
-        // 建議在 iPhone 11 網頁端跑最穩定的 1.5B 輕量模型
         const modelId = "Qwen2.5-Coder-1.5B-Instruct-q4f16_1-MLC"; 
 
         const actionBtn = document.getElementById('action-btn');
         const statusText = document.getElementById('status-text');
+        const progressEl = document.getElementById('download-progress'); // 🛠️ 取得進度條元素
         const resultArea = document.getElementById('result-area');
         const resCustomer = document.getElementById('res-customer');
         const resItems = document.getElementById('res-items');
         const resTotal = document.getElementById('res-total');
 
-        // --- 1. 網頁開啟：背景初始化 AI ---
         async function initSystem() {
             try {
                 if (!navigator.gpu) {
                     statusText.innerText = "❌ 瀏覽器不支援 WebGPU，請使用 iOS 17+ Safari。";
                     actionBtn.innerText = "無法在此設備執行";
+                    progressEl.style.display = "none";
                     return;
                 }
                 
-                // 初始化語音辨識
                 setupSpeech();
 
                 engine = await window.webllm.CreateEngine(modelId, {
                     initProgressCallback: (report) => {
                         let percent = Math.round(report.progress * 100);
+                        // 🛠️ 同步更新進度條的值
+                        progressEl.value = percent; 
                         statusText.innerText = `🧠 AI 大腦下載加載中... (${percent}%)`;
                         actionBtn.innerText = `讀取中 ${percent}%`;
+                        
+                        // 🛠️ 下載完成達 100% 時，自動隱藏進度條
+                        if (percent >= 100) {
+                            progressEl.style.display = "none";
+                        }
                     }
                 });
                 
-                statusText.innerText = "✅ 點餐系統已就緒";
+                statusText.innerText = "✅ 點餐系統已就緒 (已儲存於本地快取)";
                 actionBtn.innerText = "🎤 按一下 開始點餐";
                 actionBtn.disabled = false;
             } catch (err) {
@@ -102,7 +111,6 @@
             }
         }
 
-        // --- 2. 語音辨識設定 (Web Speech API) ---
         function setupSpeech() {
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             if (!SpeechRecognition) {
@@ -112,7 +120,6 @@
             
             recognition = new SpeechRecognition();
             recognition.lang = 'zh-TW';
-            // 開啟連續辨識，讓同步顯示更靈敏
             recognition.interimResults = true; 
             recognition.continuous = true;
 
@@ -120,17 +127,15 @@
                 let interimTranscript = '';
                 for (let i = event.resultIndex; i < event.results.length; ++i) {
                     if (event.results[i].isFinal) {
-                        finalTranscript += event.results[i][0].transcript;
+                        finalTranscript += event.results[i].transcript;
                     } else {
-                        interimTranscript += event.results[i][0].transcript;
+                        interimTranscript += event.results[i].transcript;
                     }
                 }
-                // 同步將正在說、和說完的話直接塞進按鈕文字裡！
                 actionBtn.innerText = finalTranscript || interimTranscript || "正在聆聽...";
             };
 
             recognition.onerror = (err) => {
-                console.error("語音錯誤:", err);
                 if (err.error === 'not-allowed') {
                     alert("請允許此網頁的「麥克風存取權限」，否則無法語音點餐！");
                     stopListening();
@@ -138,22 +143,19 @@
             };
         }
 
-        // --- 3. 按鈕點擊事件：控制語音開始/結束 ---
         actionBtn.addEventListener('click', () => {
             if (!isListening) {
-                // 開始說話
                 isListening = true;
                 finalTranscript = "";
                 actionBtn.innerText = "請說話...";
                 actionBtn.classList.add('listening');
                 statusText.innerText = "🔴 錄音中... 說完請再按一下按鈕結束。";
-                resultArea.style.display = "none"; // 隱藏上一次的結果
+                resultArea.style.display = "none";
                 
                 try {
                     recognition.start();
-                } catch(e) { console.log(e); }
+                } catch(e) {}
             } else {
-                // 說完了，按第二下
                 stopListening();
             }
         });
@@ -164,15 +166,9 @@
             actionBtn.disabled = true;
             statusText.innerText = "🧠 語音接收成功，本地 AI 正在解析點餐資訊...";
             
-            try {
-                recognition.stop();
-            } catch(e) {}
+            try { recognition.stop(); } catch(e) {}
 
-            // 確保有錄到文字才送給 AI
-            if (!finalTranscript.trim()) {
-                finalTranscript = actionBtn.innerText;
-            }
-            
+            if (!finalTranscript.trim()) { finalTranscript = actionBtn.innerText; }
             if (finalTranscript === "請說話..." || !finalTranscript.trim()) {
                 statusText.innerText = "⚠️ 沒有偵測到語音，請再試一次。";
                 actionBtn.innerText = "🎤 按一下 開始點餐";
@@ -180,11 +176,9 @@
                 return;
             }
 
-            // 呼叫本地 AI 提取
             await askLocalAI(finalTranscript);
         }
 
-        // --- 4. 背景呼叫本地 AI（極低溫度、精準約束） ---
         async function askLocalAI(text) {
             const systemPrompt = `You are a precise POS text parser. Strictly obey these grammar alignment rules:
 1. In Chinese ordering phrasing, numbers and units ALWAYS appear BEFORE the item name (e.g., "三杯紅茶" means 3 Black Tea). Never misalign them.
@@ -204,17 +198,14 @@ Format: {"customer": "name", "items": [{"name": "item", "count": integer}]}`;
                 renderPOSResult(JSON.parse(cleanJson));
             } catch (err) {
                 statusText.innerText = "❌ 解析失敗，請重新嘗試。";
-                console.error(err);
             } finally {
                 actionBtn.innerText = "🎤 按一下 開始點餐";
                 actionBtn.disabled = false;
             }
         }
 
-        // --- 5. 解析資料並直接秀出最終結果 ---
         function renderPOSResult(jsonData) {
             const rawCust = jsonData.customer || "未知";
-            // 對照資料庫 (老黃 -> 黃叉叉)
             const realCust = CUSTOMER_DB[rawCust] || rawCust;
             resCustomer.innerText = `${realCust} (${rawCust})`;
 
@@ -223,7 +214,7 @@ Format: {"customer": "name", "items": [{"name": "item", "count": integer}]}`;
 
             if (jsonData.items && Array.isArray(jsonData.items)) {
                 jsonData.items.forEach(item => {
-                    const price = PRICE_DB[item.name] || 0; // 對照價格
+                    const price = PRICE_DB[item.name] || 0;
                     const subtotal = price * item.count;
                     grandTotal += subtotal;
 
@@ -236,3 +227,5 @@ Format: {"customer": "name", "items": [{"name": "item", "count": integer}]}`;
             }
 
             resItems.innerHTML = html;
+            resTotal.innerText = `總金額：$${grandTotal}`;
+            statusText.innerText = "✨ 結帳明細計算完畢！";
